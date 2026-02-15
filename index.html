@@ -2,161 +2,246 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JJK x Naruto: Ultimate HUD</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shinobi HUD - Gemini 3</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', monospace; }
-        #ui { position: absolute; top: 5%; width: 100%; text-align: center; color: #fff; z-index: 10; pointer-events: none; }
-        h1 { font-size: 2.2rem; letter-spacing: 12px; margin: 0; text-shadow: 0 0 20px #9d00ff; }
-        #tech-name { font-size: 1.1rem; color: #00ffff; margin-top: 10px; letter-spacing: 5px; font-weight: bold; }
-        
-        #video-container {
-            position: absolute; bottom: 30px; left: 30px;
-            width: 180px; height: 280px; border-radius: 20px;
-            border: 2px solid rgba(255,255,255,0.4); overflow: hidden;
-            z-index: 100; background: #000; box-shadow: 0 0 30px rgba(0,0,0,0.9);
-        }
-        #ft_canvas { width: 100%; height: 100%; transform: scaleX(-1); }
-        video { display: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; color: white; }
+        #brand-tag { position: absolute; top: 20px; left: 20px; font-size: 0.55rem; letter-spacing: 3px; color: rgba(255, 255, 255, 0.4); text-transform: uppercase; z-index: 150; }
+        #overlay { position: fixed; inset: 0; background: black; z-index: 200; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; text-align: center; }
+        #overlay h1 { font-size: 0.8rem; letter-spacing: 5px; color: #ff3333; margin-bottom: 20px; }
+        #instructions { font-size: 0.5rem; line-height: 1.6; color: rgba(255,255,255,0.7); letter-spacing: 1px; max-width: 300px; text-transform: uppercase; margin-bottom: 30px; }
+        #gemini-credit { font-size: 0.45rem; color: rgba(255,255,255,0.4); letter-spacing: 2px; position: absolute; bottom: 40px; }
+        #state-text { position: absolute; top: 8%; width: 100%; text-align: center; font-size: 0.65rem; letter-spacing: 12px; z-index: 100; text-transform: uppercase; font-weight: bold; pointer-events: none; }
+        #facetime-box { position: absolute; bottom: 30px; left: 30px; width: 150px; height: 200px; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.2); z-index: 50; }
+        video { position: absolute; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas#skeleton_canvas { position: absolute; width: 100%; height: 100%; z-index: 61; transform: scaleX(-1); }
+        #three_canvas { position: absolute; inset: 0; z-index: 5; }
     </style>
-    <script type="importmap">
-        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script type="importmap"> { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } } </script>
 </head>
 <body>
-    <div id="ui">
-        <h1>呪術 vs 忍</h1>
-        <div id="tech-name">AWAITING CHAKRA...</div>
+
+    <div id="brand-tag">CREATED BY 0RIXIS</div>
+    
+    <div id="overlay" onclick="startApp()">
+        <h1>SURGE CHAKRA</h1>
+        <div id="instructions">
+            RASENGAN: FLAT UPRIGHT PALM<br>
+            CHIDORI: DOWNWARD CLAW GESTURE<br>
+            KAMUI: V-SIGN (INDEX + MIDDLE UP)<br>
+            AMATERASU: TIGHT CLOSED FIST<br>
+            RECEIVERS: INDEX UP / OTHERS FOLDED<br>
+            (SHATTERS AFTER 3S | 2S COOLDOWN)
+        </div>
+        <div id="gemini-credit">built by Gemini 3, Enjoy!</div>
     </div>
-    <div id="video-container"><canvas id="ft_canvas"></canvas></div>
-    <video class="input_video" playsinline></video>
+
+    <div id="state-text">NEUTRAL STATE</div>
+    
+    <div id="facetime-box">
+        <video id="input_video" playsinline muted autoplay></video>
+        <canvas id="skeleton_canvas"></canvas>
+    </div>
 
 <script type="module">
     import * as THREE from 'three';
-    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-    // --- Engine Setup ---
+    let appStarted = false;
+    let receiverStartTime = 0;
+    let cooldownEndTime = 0;
+    let isShattered = false;
+
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 50;
-
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 1, 3000);
+    camera.position.z = 250;
+    
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
     document.body.appendChild(renderer.domElement);
+    renderer.domElement.id = "three_canvas";
 
-    const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 2.0, 0.4, 0.85);
-    composer.addPass(bloom);
-
-    const COUNT = 20000;
-    const geometry = new THREE.BufferGeometry();
-    const pos = new Float32Array(COUNT * 3);
-    const col = new Float32Array(COUNT * 3);
-    const siz = new Float32Array(COUNT);
-    const targetPos = new Float32Array(COUNT * 3);
-    const targetCol = new Float32Array(COUNT * 3);
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(siz, 1));
-
-    const material = new THREE.PointsMaterial({ size: 0.5, vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const points = new THREE.Points(geometry, material);
-    scene.add(points);
-
-    // --- VFX Generators ---
-    const getPurple = (i) => {
-        const isCore = i < COUNT * 0.15;
-        if(isCore) return { x: (Math.random()-0.5)*4, y:(Math.random()-0.5)*4, z:(Math.random()-0.5)*4, r:1, g:1, b:1, s:4 };
-        const angle = Math.random() * Math.PI * 2;
-        const rad = 15 + Math.random() * 8;
-        return { x: Math.cos(angle)*rad, y: Math.sin(angle)*rad, z: (Math.random()-0.5)*15, r:0.6, g:0, b:1, s:2 };
+    const createPointTexture = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        const grad = ctx.createRadialGradient(32,32,0,32,32,32);
+        grad.addColorStop(0, 'white');
+        grad.addColorStop(0.2, 'rgba(255,255,255,0.9)');
+        grad.addColorStop(0.5, 'rgba(0,180,255,0.4)');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0,0,64,64);
+        return new THREE.CanvasTexture(canvas);
     };
 
-    const getBlackFlash = (i) => ({
-        x: (Math.random()-0.5)*40, y: (Math.random()-0.5)*40, z: (Math.random()-0.5)*10,
-        r: Math.random() > 0.5 ? 1 : 0, g: 0, b: 0, s: 2
-    });
-
-    // --- Tracking & Logic ---
-    const videoElement = document.querySelector('.input_video');
-    const ftCanvas = document.getElementById('ft_canvas');
-    const ftCtx = ftCanvas.getContext('2d');
-    let sharinganOn = false;
-
-    const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    hands.setOptions({ maxNumHands: 2, minDetectionConfidence: 0.75 });
+    const COUNT = 18000;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(COUNT * 3);
+    const tar = new Float32Array(COUNT * 3);
+    const base = new Float32Array(COUNT * 3); 
     
-    const faceMesh = new FaceMesh({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
-    faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.6 });
+    for(let i=0; i<COUNT; i++) {
+        base[i*3] = (Math.random()-0.5)*1800; 
+        base[i*3+1] = (Math.random()-0.5)*1800; 
+        base[i*3+2] = (Math.random()-0.5)*800;
+        pos[i*3] = base[i*3]; pos[i*3+1] = base[i*3+1]; pos[i*3+2] = base[i*3+2];
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const mat = new THREE.PointsMaterial({ size: 1.6, map: createPointTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+    const points = new THREE.Points(geo, mat);
+    scene.add(points);
 
-    faceMesh.onResults(res => {
-        ftCanvas.width = 360; ftCanvas.height = 560;
-        ftCtx.drawImage(videoElement, 0, 0, ftCanvas.width, ftCanvas.height);
-        if(sharinganOn && res.multiFaceLandmarks) {
-            [468, 473].forEach(id => {
-                const eye = res.multiFaceLandmarks[0][id];
-                ftCtx.fillStyle = "red"; ftCtx.shadowBlur = 15; ftCtx.shadowColor = "red";
-                ftCtx.beginPath(); ftCtx.arc(eye.x * ftCanvas.width, eye.y * ftCanvas.height, 7, 0, 7); ftCtx.fill();
-            });
-        }
-    });
+    const video = document.getElementById('input_video');
+    const canvas = document.getElementById('skeleton_canvas');
+    const ctx = canvas.getContext('2d');
+    const label = document.getElementById('state-text');
 
-    hands.onResults(res => {
-        let current = 'Neutral';
-        if(res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+    window.startApp = () => { document.getElementById('overlay').style.display = 'none'; appStarted = true; };
+
+    let mode = "neutral";
+    let hX = 0, hY = 0;
+
+    hands.onResults((res) => {
+        if (!appStarted) return;
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const now = Date.now();
+
+        if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
             const lm = res.multiHandLandmarks[0];
-            const d = (p1, p2) => Math.hypot(lm[p1].x-lm[p2].x, lm[p1].y-lm[p2].y);
-            const up = (i) => lm[i].y < lm[i-2].y;
+            drawConnectors(ctx, lm, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 1.2});
+            drawLandmarks(ctx, lm, {color: '#00ccff', lineWidth: 1, radius: 2});
 
-            if(d(4,8) < 0.04) current = 'Purple';
-            else if(up(8) && up(12) && up(16) && !up(20)) { current = 'Sharingan'; sharinganOn = true; }
-            else if(up(8) && up(12) && up(16) && up(20)) current = 'Shrine';
-            else if(!up(8) && !up(12) && !up(16) && !up(20)) current = 'BlackFlash';
-            else if(d(4,20) < 0.1) current = 'Rasengan';
-            else sharinganOn = false;
+            hX = (0.5 - lm[9].x) * 500; hY = (0.5 - lm[9].y) * 400;
+            const d = (p1, p2) => Math.hypot(lm[p1].x - lm[p2].x, lm[p1].y - lm[p2].y);
 
-            document.getElementById('tech-name').innerText = current.toUpperCase();
-            
-            for(let i=0; i<COUNT; i++) {
-                let p = {x:0, y:0, z:0, r:0, g:0.5, b:1, s:0.1};
-                if(current === 'Purple') p = getPurple(i);
-                else if(current === 'BlackFlash') p = getBlackFlash(i);
-                else if(current === 'Rasengan') { const r=12; const a=Math.random()*6.28; p={x:Math.cos(a)*r, y:Math.sin(a)*r, z:(Math.random()-0.5)*10, r:0, g:0.8, b:1, s:2}; }
-                
-                targetPos[i*3] = p.x; targetPos[i*3+1] = p.y; targetPos[i*3+2] = p.z;
-                targetCol[i*3] = p.r; targetCol[i*3+1] = p.g; targetCol[i*3+2] = p.b;
-                geometry.attributes.size.array[i] = p.s;
+            const isFist = d(8,0) < 0.16 && d(12,0) < 0.16;
+            const isPalm = d(8,0) > 0.38 && d(20,0) > 0.38;
+            const isPointing = lm[8].y < lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y;
+            // EASIER KAMUI: Index and Middle extended, Ring and Pinky folded.
+            const isKamuiSign = (lm[8].y < lm[6].y) && (lm[12].y < lm[10].y) && (lm[16].y > lm[14].y) && (lm[20].y > lm[18].y);
+
+            const prevMode = mode;
+            if (now < cooldownEndTime) {
+                mode = "neutral"; label.innerText = "CHAKRA RECHARGING..."; label.style.color = "#444444";
+            } else {
+                if (isKamuiSign && !isPalm) {
+                    mode = "kamui"; label.innerText = "KAMUI"; label.style.color = "#ffffff"; isShattered = false;
+                } else if (isPointing && !isPalm && !isShattered) {
+                    mode = "receivers"; label.innerText = "BLACK CHAKRA RECEIVERS"; label.style.color = "#990000";
+                    if (prevMode !== "receivers") receiverStartTime = now;
+                } else if (isFist) {
+                    mode = "amaterasu"; label.innerText = "AMATERASU"; label.style.color = "#ff0044"; isShattered = false;
+                } else if (d(8, 20) < 0.35 && !isPalm && !isFist) {
+                    mode = "chidori"; label.innerText = "CHIDORI"; label.style.color = "#aaccff"; isShattered = false;
+                } else if (isPalm) {
+                    mode = "rasengan"; label.innerText = "RASENGAN"; label.style.color = "#00ccff"; isShattered = false;
+                } else {
+                    mode = "neutral"; label.innerText = "NEUTRAL STATE"; label.style.color = "#ffffff"; isShattered = false;
+                }
             }
+        } else {
+            mode = "neutral"; label.innerText = "NEUTRAL STATE"; label.style.color = "#ffffff"; isShattered = false;
         }
     });
-
-    const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => { await faceMesh.send({image: videoElement}); await hands.send({image: videoElement}); },
-        width: 640, height: 480
-    });
-    cameraUtils.start();
 
     function animate() {
         requestAnimationFrame(animate);
-        const p = geometry.attributes.position.array;
-        const c = geometry.attributes.color.array;
-        for(let i=0; i<COUNT*3; i++) {
-            p[i] += (targetPos[i] - p[i]) * 0.15;
-            c[i] += (targetCol[i] - c[i]) * 0.15;
+        const p = geo.attributes.position.array;
+        const time = Date.now() * 0.001;
+        const now = Date.now();
+
+        if (mode === "receivers" && !isShattered) {
+            if (now - receiverStartTime > 3000) { 
+                isShattered = true; mode = "neutral"; cooldownEndTime = now + 2000; 
+            }
         }
-        geometry.attributes.position.needsUpdate = true;
-        geometry.attributes.color.needsUpdate = true;
-        geometry.attributes.size.needsUpdate = true;
-        points.rotation.y += 0.02;
-        composer.render();
+
+        for(let i=0; i<COUNT; i++) {
+            const i3 = i * 3;
+            if (isShattered && (now - (cooldownEndTime - 2000) < 600)) {
+                p[i3] += (p[i3] - hX) * 0.18; p[i3+1] += (p[i3+1] - hY) * 0.18; p[i3+2] += (p[i3+2]) * 0.18;
+                continue;
+            }
+
+            if (mode === "neutral") {
+                mat.color.setHex(0xffffff);
+                tar[i3] = base[i3] + Math.sin(time + i*0.05) * 15;
+                tar[i3+1] = base[i3+1] + Math.cos(time + i*0.05) * 15;
+                tar[i3+2] = base[i3+2];
+            } else if (mode === "rasengan") {
+                mat.color.setHex(0x00ccff);
+                const layer = i % 2;
+                if (layer === 0) { 
+                    const r = 38 + Math.random() * 4;
+                    const phi = Math.acos(-1 + (2 * i) / (COUNT/2));
+                    const theta = Math.sqrt((COUNT/2) * Math.PI) * phi + time * 25;
+                    tar[i3] = hX + r * Math.cos(theta) * Math.sin(phi);
+                    tar[i3+1] = hY + r * Math.sin(theta) * Math.sin(phi);
+                    tar[i3+2] = r * Math.cos(phi);
+                } else { 
+                    const r = 45 + Math.random() * 15;
+                    const phi = Math.acos(-1 + (2 * i) / (COUNT/2));
+                    const theta = Math.sqrt((COUNT/2) * Math.PI) * phi - time * 15;
+                    tar[i3] = hX + r * Math.cos(theta) * Math.sin(phi);
+                    tar[i3+1] = hY + r * Math.sin(theta) * Math.sin(phi);
+                    tar[i3+2] = r * Math.cos(phi);
+                }
+            } else if (mode === "chidori") {
+                mat.color.setHex(0xaaccff);
+                const boltId = i % 12;
+                const segment = (i / 12) % 40;
+                const angle = boltId * (Math.PI * 2 / 12) + Math.sin(time * 15 + boltId);
+                const length = segment * 5.5;
+                const noise = (Math.random() - 0.5) * 45;
+                tar[i3] = hX + Math.cos(angle) * length + noise;
+                tar[i3+1] = hY + Math.sin(angle) * length + noise;
+                tar[i3+2] = (Math.random() - 0.5) * 120;
+            } else if (mode === "receivers") {
+                mat.color.setHex(0x990000);
+                const rodId = i % 7;
+                const rodProgress = (i / COUNT) * 7 % 1.0; 
+                const taper = rodProgress; 
+                const xOff = (rodId - 3.5) * 45;
+                const vibrate = (now - receiverStartTime > 2500) ? (Math.random()-0.5)*22 : 0;
+                tar[i3] = hX + xOff + (Math.random()-0.5) * (12 * taper) + vibrate;
+                tar[i3+1] = hY + (rodProgress * 280 - 140);
+                tar[i3+2] = Math.sin(rodId) * 40;
+            } else if (mode === "kamui") {
+                mat.color.setHex(0xffffff);
+                const angle = i * 0.15 + time * 18;
+                const rad = (200 - (time * 150 + i * 0.4) % 200);
+                tar[i3] = hX + Math.cos(angle) * rad;
+                tar[i3+1] = hY + Math.sin(angle) * rad;
+                tar[i3+2] = -rad;
+            } else { // Amaterasu
+                mat.color.setHex(0xff0044);
+                const r = 75 + Math.sin(time * 25 + i) * 10;
+                const phi = Math.acos(-1 + (2 * i) / COUNT);
+                const theta = Math.sqrt(COUNT * Math.PI) * phi + time * 5;
+                tar[i3] = hX + r * Math.cos(theta) * Math.sin(phi);
+                tar[i3+1] = hY + r * Math.sin(theta) * Math.sin(phi);
+                tar[i3+2] = r * Math.cos(phi);
+            }
+
+            const speed = (mode === "neutral" || isShattered) ? 0.02 : 0.45;
+            p[i3] += (tar[i3] - p[i3]) * speed;
+            p[i3+1] += (tar[i3+1] - p[i3+1]) * speed;
+            p[i3+2] += (tar[i3+2] - p[i3+2]) * speed;
+        }
+        geo.attributes.position.needsUpdate = true;
+        renderer.render(scene, camera);
     }
+
+    const cam = new Camera(video, { onFrame: async () => { await hands.send({image: video}); }, width: 1280, height: 720 });
+    cam.start();
     animate();
 </script>
 </body>
