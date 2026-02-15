@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JJK x Naruto: Ultimate HUD</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', monospace; }
+        #ui { position: absolute; top: 5%; width: 100%; text-align: center; color: #fff; z-index: 10; pointer-events: none; }
+        h1 { font-size: 2.2rem; letter-spacing: 12px; margin: 0; text-shadow: 0 0 20px #9d00ff; }
+        #tech-name { font-size: 1.1rem; color: #00ffff; margin-top: 10px; letter-spacing: 5px; font-weight: bold; }
+        
+        #video-container {
+            position: absolute; bottom: 30px; left: 30px;
+            width: 180px; height: 280px; border-radius: 20px;
+            border: 2px solid rgba(255,255,255,0.4); overflow: hidden;
+            z-index: 100; background: #000; box-shadow: 0 0 30px rgba(0,0,0,0.9);
+        }
+        #ft_canvas { width: 100%; height: 100%; transform: scaleX(-1); }
+        video { display: none; }
+    </style>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+</head>
+<body>
+    <div id="ui">
+        <h1>呪術 vs 忍</h1>
+        <div id="tech-name">AWAITING CHAKRA...</div>
+    </div>
+    <div id="video-container"><canvas id="ft_canvas"></canvas></div>
+    <video class="input_video" playsinline></video>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+    // --- Engine Setup ---
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 50;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 2.0, 0.4, 0.85);
+    composer.addPass(bloom);
+
+    const COUNT = 20000;
+    const geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array(COUNT * 3);
+    const col = new Float32Array(COUNT * 3);
+    const siz = new Float32Array(COUNT);
+    const targetPos = new Float32Array(COUNT * 3);
+    const targetCol = new Float32Array(COUNT * 3);
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(siz, 1));
+
+    const material = new THREE.PointsMaterial({ size: 0.5, vertexColors: true, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
+
+    // --- VFX Generators ---
+    const getPurple = (i) => {
+        const isCore = i < COUNT * 0.15;
+        if(isCore) return { x: (Math.random()-0.5)*4, y:(Math.random()-0.5)*4, z:(Math.random()-0.5)*4, r:1, g:1, b:1, s:4 };
+        const angle = Math.random() * Math.PI * 2;
+        const rad = 15 + Math.random() * 8;
+        return { x: Math.cos(angle)*rad, y: Math.sin(angle)*rad, z: (Math.random()-0.5)*15, r:0.6, g:0, b:1, s:2 };
+    };
+
+    const getBlackFlash = (i) => ({
+        x: (Math.random()-0.5)*40, y: (Math.random()-0.5)*40, z: (Math.random()-0.5)*10,
+        r: Math.random() > 0.5 ? 1 : 0, g: 0, b: 0, s: 2
+    });
+
+    // --- Tracking & Logic ---
+    const videoElement = document.querySelector('.input_video');
+    const ftCanvas = document.getElementById('ft_canvas');
+    const ftCtx = ftCanvas.getContext('2d');
+    let sharinganOn = false;
+
+    const hands = new Hands({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({ maxNumHands: 2, minDetectionConfidence: 0.75 });
+    
+    const faceMesh = new FaceMesh({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+    faceMesh.setOptions({ refineLandmarks: true, minDetectionConfidence: 0.6 });
+
+    faceMesh.onResults(res => {
+        ftCanvas.width = 360; ftCanvas.height = 560;
+        ftCtx.drawImage(videoElement, 0, 0, ftCanvas.width, ftCanvas.height);
+        if(sharinganOn && res.multiFaceLandmarks) {
+            [468, 473].forEach(id => {
+                const eye = res.multiFaceLandmarks[0][id];
+                ftCtx.fillStyle = "red"; ftCtx.shadowBlur = 15; ftCtx.shadowColor = "red";
+                ftCtx.beginPath(); ftCtx.arc(eye.x * ftCanvas.width, eye.y * ftCanvas.height, 7, 0, 7); ftCtx.fill();
+            });
+        }
+    });
+
+    hands.onResults(res => {
+        let current = 'Neutral';
+        if(res.multiHandLandmarks && res.multiHandLandmarks[0]) {
+            const lm = res.multiHandLandmarks[0];
+            const d = (p1, p2) => Math.hypot(lm[p1].x-lm[p2].x, lm[p1].y-lm[p2].y);
+            const up = (i) => lm[i].y < lm[i-2].y;
+
+            if(d(4,8) < 0.04) current = 'Purple';
+            else if(up(8) && up(12) && up(16) && !up(20)) { current = 'Sharingan'; sharinganOn = true; }
+            else if(up(8) && up(12) && up(16) && up(20)) current = 'Shrine';
+            else if(!up(8) && !up(12) && !up(16) && !up(20)) current = 'BlackFlash';
+            else if(d(4,20) < 0.1) current = 'Rasengan';
+            else sharinganOn = false;
+
+            document.getElementById('tech-name').innerText = current.toUpperCase();
+            
+            for(let i=0; i<COUNT; i++) {
+                let p = {x:0, y:0, z:0, r:0, g:0.5, b:1, s:0.1};
+                if(current === 'Purple') p = getPurple(i);
+                else if(current === 'BlackFlash') p = getBlackFlash(i);
+                else if(current === 'Rasengan') { const r=12; const a=Math.random()*6.28; p={x:Math.cos(a)*r, y:Math.sin(a)*r, z:(Math.random()-0.5)*10, r:0, g:0.8, b:1, s:2}; }
+                
+                targetPos[i*3] = p.x; targetPos[i*3+1] = p.y; targetPos[i*3+2] = p.z;
+                targetCol[i*3] = p.r; targetCol[i*3+1] = p.g; targetCol[i*3+2] = p.b;
+                geometry.attributes.size.array[i] = p.s;
+            }
+        }
+    });
+
+    const cameraUtils = new Camera(videoElement, {
+        onFrame: async () => { await faceMesh.send({image: videoElement}); await hands.send({image: videoElement}); },
+        width: 640, height: 480
+    });
+    cameraUtils.start();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const p = geometry.attributes.position.array;
+        const c = geometry.attributes.color.array;
+        for(let i=0; i<COUNT*3; i++) {
+            p[i] += (targetPos[i] - p[i]) * 0.15;
+            c[i] += (targetCol[i] - c[i]) * 0.15;
+        }
+        geometry.attributes.position.needsUpdate = true;
+        geometry.attributes.color.needsUpdate = true;
+        geometry.attributes.size.needsUpdate = true;
+        points.rotation.y += 0.02;
+        composer.render();
+    }
+    animate();
+</script>
+</body>
+</html>
